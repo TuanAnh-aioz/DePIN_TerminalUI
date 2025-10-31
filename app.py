@@ -1,17 +1,15 @@
-import os
 import signal
 import subprocess
+import sys
 from pathlib import Path
+
+from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Static, Button
-from rich.text import Text
-import psutil
-from hub import get_node_info, get_node_balance, update_info
-from textual import events
-import sys
+from textual.widgets import Button, Static
 
-from hub import get_node_info, get_node_balance, update_info
+from hub import SERVER_URL, get_node_balance, get_node_info, update_info
 
 AIOZ_EXE_PATH = "./dist/aiozAiNodeWrapper"
 
@@ -80,7 +78,7 @@ class AiozDashboard(App):
         wd = Path("./dist") / "node-data"
         wd.mkdir(parents=True, exist_ok=True)
 
-        cmd = [AIOZ_EXE_PATH, "-wd", str(wd), "-dc", "15360", "-ha", "http://10.0.0.238:8083"]
+        cmd = [AIOZ_EXE_PATH, "-wd", str(wd), "-dc", "15360", "-ha", SERVER_URL]
         self.write_log(f"Running: {' '.join(cmd)}")
 
         process = subprocess.Popen(
@@ -102,7 +100,7 @@ class AiozDashboard(App):
 
         # Container layout
         self.left_panel = Vertical(self.storage_card, self.ai_card, self.transcoding_card, id="left")
-        self.right_panel = Vertical(self.balance_card,  Button("Stop Node", id="stop_node", variant="error"), id="right")
+        self.right_panel = Vertical(self.balance_card, Button("Stop Node", id="stop_node", variant="error"), id="right")
         self.main_layout = Horizontal(self.left_panel, self.right_panel)
         self.root_layout = Vertical(self.main_layout, self.log_widget)
 
@@ -110,7 +108,7 @@ class AiozDashboard(App):
 
         # Start AIOZ Node
         self.node_process, self.wd = self.start_aioz_exe()
-        self.write_log(f"AIOZ Node started with PID: {self.node_process.pid}")
+        # self.write_log(f"AIOZ Node started with PID: {self.node_process.pid}")
 
         # Bắt Ctrl+C / terminate
         self.setup_signal_handlers()
@@ -125,18 +123,19 @@ class AiozDashboard(App):
             info = get_node_info()
             if info:
                 break
-        
+
         # Refresh status mỗi 3 giây
         self.set_interval(3, self.refresh_status)
 
     async def refresh_status(self):
         try:
             info = get_node_info()
-            status = info.get("status", "Unknown")
 
             balance = get_node_balance()
             if not info or not balance:
                 return
+
+            status = info.get("status", "Unknown")
 
             total_amount = sum(v["amount"] for v in balance["earned"].values())
             total_aios = total_amount / 1e18
@@ -163,7 +162,7 @@ class AiozDashboard(App):
             subprocess.run(["pkill", "-9", "-f", "aiozAiNodeExe"], check=False)
         except Exception as e:
             print(f"Error killing aiozAiNodeWrapper: {e}")
-            
+
     async def cleanup_and_exit(self):
         self.kill_all_aioz_processes()
         self.exit()
@@ -180,6 +179,7 @@ class AiozDashboard(App):
     def _sig_exit(self):
         self.kill_all_aioz_processes()
         sys.exit(0)
+
 
 if __name__ == "__main__":
     AiozDashboard().run()

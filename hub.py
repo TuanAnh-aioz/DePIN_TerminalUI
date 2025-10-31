@@ -1,7 +1,17 @@
-import requests
+import os
 
-API_KEY = "0B9396b4beA3F542B0B86519077d82ed0013c498a586435268bF11866D42eCc2"
-API_URL = "http://localhost:1111"
+import requests
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=".env")
+
+API_KEY = os.getenv("API_KEY")
+API_URL = os.getenv("API_URL")
+WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
+PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+
+SERVER_URL = os.getenv("SERVER_URL")
+
 
 # -----------------------------
 # 2️⃣ Hàm gọi API từ node
@@ -16,6 +26,7 @@ def get_node_info():
         pass
     return None
 
+
 def get_node_balance():
     try:
         headers = {"x-api-key": API_KEY, "accept": "application/json"}
@@ -26,13 +37,11 @@ def get_node_balance():
         pass
     return None
 
+
 def update_info():
     try:
         headers = {"x-api-key": API_KEY, "accept": "application/json"}
-        payload = {
-            "wallet_address": "0x04423d591ef814beD75608876BAD5Dea4F643113",
-            "private_key": "MBkDV27rczxTRf+Qw9ApNCAUyqaB0hUSH+u9fgl3RaE="
-        }
+        payload = {"wallet_address": WALLET_ADDRESS, "private_key": PRIVATE_KEY}
         response = requests.put(f"{API_URL}/node/update", json=payload, headers=headers)
         if response.status_code == 200:
             return response.json()
