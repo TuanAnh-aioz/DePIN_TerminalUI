@@ -11,6 +11,7 @@ WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
 SERVER_URL = os.getenv("SERVER_URL")
+AIOZ_EXE_PATH = os.getenv("AIOZ_EXE_PATH")
 
 
 # -----------------------------

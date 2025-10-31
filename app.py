@@ -1,6 +1,7 @@
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from rich.text import Text
@@ -9,9 +10,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
-from hub import SERVER_URL, get_node_balance, get_node_info, update_info
-
-AIOZ_EXE_PATH = "./dist/aiozAiNodeWrapper"
+from hub import AIOZ_EXE_PATH, SERVER_URL, get_node_balance, get_node_info, update_info
 
 
 class InfoCard(Static):
@@ -62,17 +61,29 @@ class AiozDashboard(App):
     BalanceCard { padding: 1; }
     Button { margin-top: 1; }
     #log_widget { border: round #666666; padding: 1; height: 10; overflow: auto; }
+
+    #stop_node {
+        background: #666666;
+        color: white;
+        border: round #888888;
+        padding: 0 2;
+        max-width: 16;
+        align: center bottom;
+    }
+
+    #stop_node:hover {
+        background: #888888;
+    }
     """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.log_content = ""
         self.node_process = None
+        self.log_text = ""
 
-    def write_log(self, msg: str):
-        self.log_content += msg + "\n"
-        if hasattr(self, "log_widget"):
-            self.log_widget.update(self.log_content)
+    def write_log(self, message: str):
+        self.log_text = f"{time.time()} {message}\n"
+        self.log_widget.update(self.log_text)
 
     def start_aioz_exe(self):
         wd = Path("./dist") / "node-data"
@@ -89,28 +100,28 @@ class AiozDashboard(App):
         return process, wd
 
     async def on_mount(self):
-        # Tạo log widget
+        # Create cardslog widget
         self.log_widget = Static(id="log_widget")
 
-        # Tạo các card
+        # Create cards
         self.ai_card = InfoCard("AI", "Starting up", 0.0, color="green")
         self.transcoding_card = InfoCard("Transcoding Beta", "Standby", 0.0, color="green")
         self.storage_card = InfoCard("Storage", "Standby", 18.01109555, color="green")
         self.balance_card = BalanceCard(balance=4.94842765, total_rewards=18.61248953, withdrawn=13.66406188)
 
-        # Container layout
+        # Layout
         self.left_panel = Vertical(self.storage_card, self.ai_card, self.transcoding_card, id="left")
-        self.right_panel = Vertical(self.balance_card, Button("Stop Node", id="stop_node", variant="error"), id="right")
+        self.right_panel = Vertical(self.balance_card, Button("Pause", id="stop_node", variant="primary"), id="right")
         self.main_layout = Horizontal(self.left_panel, self.right_panel)
         self.root_layout = Vertical(self.main_layout, self.log_widget)
 
         await self.mount(self.root_layout)
 
-        # Start AIOZ Node
+        # Start node
         self.node_process, self.wd = self.start_aioz_exe()
-        # self.write_log(f"AIOZ Node started with PID: {self.node_process.pid}")
+        # self.write_log(f"AIOZ Node started PID={self.node_process.pid}")
 
-        # Bắt Ctrl+C / terminate
+        # Check Ctrl+C / terminate
         self.setup_signal_handlers()
 
         # Update info
@@ -118,33 +129,30 @@ class AiozDashboard(App):
             info = update_info()
             if info:
                 break
-
         for _ in range(15):
             info = get_node_info()
             if info:
                 break
 
-        # Refresh status mỗi 3 giây
+        # Refresh
         self.set_interval(3, self.refresh_status)
 
     async def refresh_status(self):
         try:
             info = get_node_info()
-
             balance = get_node_balance()
             if not info or not balance:
                 return
 
             status = info.get("status", "Unknown")
-
             total_amount = sum(v["amount"] for v in balance["earned"].values())
-            total_aios = total_amount / 1e18
-            rewards = float(total_aios)
-
+            rewards = total_amount / 1e18
+            self.write_log(f"Blance: {rewards}")
             balance_val = float(balance.get("balance", 0))
 
             self.ai_card.update_content(status, rewards)
             self.balance_card.update_balance(balance_val)
+
         except Exception as e:
             self.write_log(f"refresh_status error: {e}")
 
@@ -155,17 +163,14 @@ class AiozDashboard(App):
     def kill_all_aioz_processes(self):
         try:
             subprocess.run(["pkill", "-9", "-f", "aiozAiNodeWrapper"], check=False)
-        except Exception as e:
-            print(f"Error killing aiozAiNodeWrapper: {e}")
-
-        try:
             subprocess.run(["pkill", "-9", "-f", "aiozAiNodeExe"], check=False)
+            self.write_log("Killed all aioz node processes")
         except Exception as e:
-            print(f"Error killing aiozAiNodeWrapper: {e}")
+            self.write_log(f"Error killing processes: {e}")
 
     async def cleanup_and_exit(self):
         self.kill_all_aioz_processes()
-        self.exit()
+        sys.exit(0)
 
     async def on_key(self, event: events.Key):
         if event.key == "q" and event.ctrl:
