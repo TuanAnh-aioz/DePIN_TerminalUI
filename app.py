@@ -6,7 +6,7 @@ from pathlib import Path
 
 from rich.text import Text
 from textual import events
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, Timer
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
@@ -14,17 +14,32 @@ from hub import AIOZ_EXE_PATH, SERVER_URL, get_node_balance, get_node_info, upda
 
 
 class InfoCard(Static):
-    def __init__(self, title: str, status: str, rewards: float, color: str = "cyan"):
+    def __init__(
+        self,
+        title: str,
+        status: str,
+        rewards: float,
+        color: str = "cyan",
+        auto_transition: bool = False,
+    ):
         super().__init__()
         self.title = title
         self.status = status
         self.rewards = rewards
         self.color = color
+        self.auto_transition = auto_transition
+        self._status_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(Text(self.title, style=f"bold {self.color}"))
         yield Static(f"[grey58]{self.status}[/grey58]", id="status")
         yield Static(f"[bold]{self.rewards:.8f}[/bold] AIOZ Rewards", id="rewards")
+
+    async def on_mount(self):
+        if self.auto_transition and self.status.lower() == "initiating":
+            if self._status_timer:
+                self._status_timer.cancel()
+            self._status_timer = self.set_timer(10, self._set_standby)
 
     def update_content(self, status: str, rewards: float):
         self.status = status
@@ -32,9 +47,18 @@ class InfoCard(Static):
         self.query_one("#status", Static).update(f"[grey58]{status}[/grey58]")
         self.query_one("#rewards", Static).update(f"[bold]{rewards:.8f}[/bold] AIOZ Rewards")
 
+        if self.auto_transition and status.lower() == "initiating":
+            if self._status_timer:
+                self._status_timer.cancel()
+            self._status_timer = self.set_timer(10, self._set_standby)
+
+    def _set_standby(self):
+        self.status = "Standby"
+        self.query_one("#status", Static).update("[grey58]Standby[/grey58]")
+
 
 class BalanceCard(Static):
-    def __init__(self, balance: float, total_rewards: float, withdrawn: float):
+    def __init__(self, balance: float = 0.0, total_rewards: float = 0.0, withdrawn: float = 0.0):
         super().__init__()
         self.balance = balance
         self.total_rewards = total_rewards
@@ -44,12 +68,17 @@ class BalanceCard(Static):
         yield Static(Text("Balance", style="bold white"))
         yield Static(Text(f"{self.balance:.8f} AIOZ", style="green"), id="balance")
         yield Static("")
-        yield Static(Text.assemble((f"{self.total_rewards:.8f}", "yellow"), ("  Total Rewards", "white")))
-        yield Static(Text.assemble((f"{self.withdrawn:.8f}", "red"), ("  Withdrawn", "white")))
+        yield Static(Text.assemble((f"{self.total_rewards:.8f}", "yellow"), ("  Total Rewards", "white")), id="rewards")
+        yield Static(Text.assemble((f"{self.withdrawn:.8f}", "red"), ("  Withdrawn", "white")), id="withdrawn")
 
-    def update_balance(self, balance: float):
-        self.balance = balance
-        self.query_one("#balance", Static).update(f"[bold green]{balance:.8f} AIOZ[/bold green]")
+    def update_balance_info(self, ai_rewards: float, transcoding_rewards: float, storage_rewards: float, withdrawn: float):
+        self.total_rewards = ai_rewards + transcoding_rewards + storage_rewards
+        self.withdrawn = withdrawn
+        self.balance = self.total_rewards - self.withdrawn
+
+        self.query_one("#balance", Static).update(f"[bold green]{self.balance:.8f} AIOZ[/bold green]")
+        self.query_one("#rewards", Static).update(Text.assemble((f"{self.total_rewards:.8f}", "yellow"), ("  Total Rewards", "white")))
+        self.query_one("#withdrawn", Static).update(Text.assemble((f"{self.withdrawn:.8f}", "red"), ("  Withdrawn", "white")))
 
 
 class AiozDashboard(App):
@@ -104,9 +133,9 @@ class AiozDashboard(App):
         self.log_widget = Static(id="log_widget")
 
         # Create cards
-        self.ai_card = InfoCard("AI", "Starting up", 0.0, color="green")
-        self.transcoding_card = InfoCard("Transcoding Beta", "Standby", 0.0, color="green")
-        self.storage_card = InfoCard("Storage", "Standby", 18.01109555, color="green")
+        self.ai_card = InfoCard("AI", "Starting up", 0.0, color="green", auto_transition=False)
+        self.transcoding_card = InfoCard("Transcoding Beta", "Initiating", 0.0137, color="green", auto_transition=True)
+        self.storage_card = InfoCard("Storage", "Initiating", 18.01109555, color="green", auto_transition=True)
         self.balance_card = BalanceCard(balance=4.94842765, total_rewards=18.61248953, withdrawn=13.66406188)
 
         # Layout
@@ -143,16 +172,21 @@ class AiozDashboard(App):
             balance = get_node_balance()
             if not info or not balance:
                 return
-
             status = info.get("status", "Unknown")
+
+            withdrawn = float(balance["withdrawn"]["amount"])
+
             total_amount = sum(v["amount"] for v in balance["earned"].values())
             rewards = total_amount / 1e18
-            self.write_log(f"Blance: {rewards}")
-            balance_val = float(balance.get("balance", 0))
+
+            # self.write_log(f"Balance: {rewards}")
+
+            ai_rewards = rewards
+            transcoding_rewards = self.transcoding_card.rewards
+            storage_rewards = self.storage_card.rewards
 
             self.ai_card.update_content(status, rewards)
-            self.balance_card.update_balance(balance_val)
-
+            self.balance_card.update_balance_info(ai_rewards, transcoding_rewards, storage_rewards, withdrawn)
         except Exception as e:
             self.write_log(f"refresh_status error: {e}")
 
